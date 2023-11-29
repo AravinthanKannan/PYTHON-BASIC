@@ -15,4 +15,11 @@ from typing import List, Any
 
 
 def delete_from_list(list_to_clean: List, item_to_delete: Any) -> List:
-    ...
+  ///  ...
+    try :
+        list_to_clean.pop(item_to_delete)
+    except IndexError:
+        print(" index out of range exception")
+    return list_to_clean
+
+print(delete_from_list([1,2,3,4,5,6],4))

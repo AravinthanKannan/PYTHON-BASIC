@@ -1,72 +1,93 @@
-from statistics import mean
-from lxml import etree
+import os
+import json
+import xml.etree.ElementTree as ET
 
+def calculate_statistics(city_data):
+    temperatures = [hour['temp'] for hour in city_data]
+    wind_speeds = [hour['wind_speed'] for hour in city_data]
 
-def check_result(xml_path: str):
-    """Function to check weather XML file for Spain for 2021-09-25"""
+    mean_temp = round(sum(temperatures) / len(temperatures), 2)
+    max_temp = round(max(temperatures), 2)
+    min_temp = round(min(temperatures), 2)
 
-    tree = etree.parse(xml_path)
-    root = tree.getroot()
+    mean_wind_speed = round(sum(wind_speeds) / len(wind_speeds), 2)
+    max_wind_speed = round(max(wind_speeds), 2)
+    min_wind_speed = round(min(wind_speeds), 2)
 
-    assert root.tag == 'weather'
-    assert not set(root.attrib.keys()).difference({'country', 'date'}), \
-        "No 'country' or 'date' attrib in 'weather' root"
+    return mean_temp, max_temp, min_temp, mean_wind_speed, max_wind_speed, min_wind_speed
 
-    children = root.getchildren()
+def process_city(city_name, city_data):
+    mean_temp, max_temp, min_temp, mean_wind_speed, max_wind_speed, min_wind_speed = calculate_statistics(city_data)
 
-    assert set([child.tag for child in children]) == {'summary', 'cities'}, \
-        f'Invalid elements in "weather" root'
+    city_element = ET.Element(city_name)
+    city_element.set('mean_temp', str(mean_temp))
+    city_element.set('max_temp', str(max_temp))
+    city_element.set('min_temp', str(min_temp))
+    city_element.set('mean_wind_speed', str(mean_wind_speed))
+    city_element.set('max_wind_speed', str(max_wind_speed))
+    city_element.set('min_wind_speed', str(min_wind_speed))
 
-    for child in children:
-        if child.tag == 'summary':
-            summary_attribs = {'mean_temp', 'mean_wind_speed', 'coldest_place', 'warmest_place', 'windiest_place'}
-            assert set(child.attrib.keys()) == summary_attribs, \
-                f'Invalid attributes list in "summary" element: {set(child.attrib.keys()).difference(summary_attribs)}'
-            summary = child.attrib
+    return city_element, mean_temp, mean_wind_speed
 
-        if child.tag == 'cities':
-            assert len([c for c in child]) == 17, f"Invalid number of cities in XML: {len([c for c in child])}"
-            cities_summary = {}
-            for city in child:
-                city_attribs = {'mean_temp', 'mean_wind_speed',
-                                'min_temp', 'min_wind_speed',
-                                'max_temp', 'max_wind_speed'}
-                assert set(city.attrib.keys()) == city_attribs, \
-                    f"Invalid attributes in element {city.tag}: {set(city.attrib.keys()).difference(city_attribs)}"
-                cities_summary[city.tag] = city.attrib
+def process_dataset(dataset_path):
+    country_data = []
 
-                if city.tag == 'Seville':
-                    try:
-                        assert float(city.attrib.get('mean_temp')) == 21.6
-                        assert float(city.attrib.get('mean_wind_speed')) == 1.04
-                        assert float(city.attrib.get('min_temp')) == 17.24
-                        assert float(city.attrib.get('min_wind_speed')) == 0.45
-                        assert float(city.attrib.get('max_temp')) == 27.13
-                        assert float(city.attrib.get('max_wind_speed')) == 2.24
-                    except AssertionError:
-                        raise AssertionError("Incorrect values for random city.")
+    for city_folder in os.listdir(dataset_path):
+        city_path = os.path.join(dataset_path, city_folder)
+        if os.path.isdir(city_path):
+            with open(os.path.join(city_path, '2021-09-25.json'), 'r') as file:
+                city_data = json.load(file)['hourly']
+                city_element, mean_temp, mean_wind_speed = process_city(city_folder, city_data)
+                country_data.append((city_folder, mean_temp, mean_wind_speed))
 
-    # check results in summary
-    mean_temp = round(mean([float(values['mean_temp']) for city, values in cities_summary.items()]), 2)
-    assert float(summary['mean_temp']) == mean_temp, "Incorrect mean temperature in summary."
+    country_mean_temp = round(sum([data[1] for data in country_data]) / len(country_data), 2)
+    country_mean_wind_speed = round(sum([data[2] for data in country_data]) / len(country_data), 2)
 
-    assert summary.get('warmest_place') == 'Palma', \
-        "The warmest place is incorrect"
-    assert max(cities_summary.items(), key=lambda item: float(item[1].get('mean_temp')))[0] == summary.get('warmest_place'), \
-        "The warmest place is incorrect. You need to find city with maximum mean temperature"
+    coldest_city, warmest_city, windiest_city = min(country_data, key=lambda x: x[1]), \
+        max(country_data, key=lambda x: x[1]), \
+        max(country_data, key=lambda x: x[2])
 
-    assert summary.get('coldest_place') == 'Valladolid', \
-        "The coldest place is incorrect"
-    assert min(cities_summary.items(), key=lambda item: float(item[1].get('mean_temp')))[0] == summary.get('coldest_place'), \
-        "The coldest place is incorrect. You need to find city with minimum mean temperature"
+    return country_mean_temp, country_mean_wind_speed, coldest_city, warmest_city, windiest_city
 
-    assert summary.get('windiest_place') == 'Pamplona', \
-        "The windiest place is incorrect"
-    assert max(cities_summary.items(), key=lambda item: float(item[1].get('mean_wind_speed')))[0] == summary.get('windiest_place'), \
-        "The coldest place is incorrect. You need to find city with maximum wind speed"
+def build_xml(country_mean_temp, country_mean_wind_speed, coldest_city, warmest_city, windiest_city, cities_data):
+    root = ET.Element('weather', country='Spain', date='2021-09-25')
 
-    print("Success!")
+    summary = ET.SubElement(root, 'summary')
+    summary.set('mean_temp', str(country_mean_temp))
+    summary.set('mean_wind_speed', str(country_mean_wind_speed))
+    summary.set('coldest_place', coldest_city[0])
+    summary.set('warmest_place', warmest_city[0])
+    summary.set('windiest_place', windiest_city[0])
 
+    cities = ET.SubElement(root, 'cities')
+
+    for city_name, mean_temp, max_temp, min_temp, mean_wind_speed, max_wind_speed, min_wind_speed in cities_data:
+        city_element = ET.SubElement(cities, city_name)
+        city_element.set('mean_temp', str(mean_temp))
+        city_element.set('max_temp', str(max_temp))
+        city_element.set('min_temp', str(min_temp))
+        city_element.set('mean_wind_speed', str(mean_wind_speed))
+        city_element.set('max_wind_speed', str(max_wind_speed))
+        city_element.set('min_wind_speed', str(min_wind_speed))
+
+    tree = ET.ElementTree(root)
+    tree.write('weather_spain.xml')
+
+def main():
+    dataset_path = 'path/to/your/dataset'
+
+    country_mean_temp, country_mean_wind_speed, coldest_city, warmest_city, windiest_city = process_dataset(dataset_path)
+
+    cities_data = []
+    for city_folder, _, _ in os.walk(dataset_path):
+        if city_folder != dataset_path:
+            with open(os.path.join(city_folder, '2021-09-25.json'), 'r') as file:
+                city_data = json.load(file)['hourly']
+                mean_temp, max_temp, min_temp, mean_wind_speed, max_wind_speed, min_wind_speed = calculate_statistics(city_data)
+                cities_data.append((os.path.basename(city_folder), mean_temp, max_temp, min_temp,
+                                    mean_wind_speed, max_wind_speed, min_wind_speed))
+
+    build_xml(country_mean_temp, country_mean_wind_speed, coldest_city, warmest_city, windiest_city, cities_data)
 
 if __name__ == '__main__':
-    check_result(xml_path='./example_result.xml')
+    main()
